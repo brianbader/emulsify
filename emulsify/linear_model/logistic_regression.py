@@ -14,25 +14,20 @@ from emulsify.linear_model.base import BaseLinear
 
 # change to base method later
 class LogisticRegression(BaseEstimator, BaseLinear):
-    def __init__(self, penalty='l2', C=1.0, fit_intercept=True, tol=0.0001, max_iter=100, engine='scikit-learn',
-                 **kwargs):
+    def __init__(self, penalty=0., mixture=0., fit_intercept=True, mode='classification'):
         self.penalty = penalty
-        self.C = C
+        self.mixture = mixture
+        self.mode = mode
         self.fit_intercept = fit_intercept
-        self.tol = tol
-        self.max_iter = max_iter
-        self.kwargs = kwargs or {}
-        self.engine = engine
-        # ToDo: set up environment (H20, spark, and probably vowpall-wabbit)
 
-    def _initialize(self, X, y):
+    def set_engine(self, engine='scikit-learn', **kwargs):
         # ToDo: add engine validation check
-        if self.engine == 'statsmodels':
-            X_ = sm.add_constant(X) if self.fit_intercept else X.copy()
-            self.model = StatsModelsLR(exog=X_, endog=y, **self.kwargs)
+        # ToDo: set up environment (H20, spark, and probably vowpall-wabbit)
+        self.model_kwargs = kwargs or {}
+        if engine == 'statsmodels':
+            self.model = None  # statsmodels api requires X, y in init step
         else:
-            self.model = ScikitLR(penalty=self.penalty, C=self.C, fit_intercept=self.fit_intercept,
-                                  tol=self.tol, max_iter=self.max_iter, **self.kwargs)
+            self.model = ScikitLR(C=1/self.penalty, l1_ratio=self.mixture, **kwargs)
 
     def _fit_case(self):
         fit_case = {
@@ -68,6 +63,9 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         self.n_iter_ = self.model.n_iter_
 
     def _fit_statsmodels(self, X, y, sample_weight, **fit_params):
+        X_ = sm.add_constant(X) if self.fit_intercept else X.copy()
+        self.model = StatsModelsLR(exog=X_, endog=y, **self.kwargs)
+
         if self.penalty == 'l1':
             logit_fitted = self.model.fit_regularized(disp=False, maxiter=self.max_iter, alpha=1/self.C, **fit_params)
         else:
