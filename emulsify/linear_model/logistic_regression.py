@@ -1,5 +1,7 @@
 """Wrappers for logistic regression implementations."""
 
+import warnings
+
 import numpy as np
 import scipy.stats as stat
 import statsmodels.api as sm
@@ -80,7 +82,7 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         if self.penalty == 0.:
             logit_fitted = self.model.fit(**self.model_kwargs)
         else:
-            Warning('Fitting l1 regularized model with specified penalty... mixture term for statsmodels has no effect')
+            warnings.warn('Fitting l1 regularized model with specified penalty... mixture term for statsmodels has no effect')
             logit_fitted = self.model.fit_regularized(**self.model_kwargs)
 
         self.estimates_ = np.asarray(logit_fitted.params).flatten()
