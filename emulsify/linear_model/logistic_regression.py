@@ -61,7 +61,6 @@ class LogisticRegression(BaseEstimator, BaseLinear):
     def fit(self, X, y, sample_weight=None, **fit_params):
         self.names_ = _get_column_names(X, self.fit_intercept)
         self._fit_case()[self.engine](X, y, sample_weight, **fit_params)
-        self._get_std_errors(X, y)
         self.z_scores_ = self.estimates_ / self.std_errors_
         self.p_values_ = np.array([stat.norm.sf(abs(z)) * 2 for z in self.z_scores_])
         return self
@@ -73,6 +72,9 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         if self.fit_intercept:
             self.estimates_ = np.concatenate((self.model.intercept_, self.estimates_))
 
+        # Multinomial logit Hessian matrix of the log-likelihood, from StatsModels API
+        hessian_ = sm.MNLogit(endog=y, exog=X).hessian(params=self.estimates_)
+        self.std_errors_ = np.sqrt(np.diagonal(np.linalg.inv(-hessian_)))
         self.num_iterations = self.model.n_iter_
 
     def _fit_statsmodels(self, X, y, sample_weight=None, **fit_params):
@@ -86,9 +88,5 @@ class LogisticRegression(BaseEstimator, BaseLinear):
             logit_fitted = self.model.fit_regularized(**self.model_kwargs)
 
         self.estimates_ = np.asarray(logit_fitted.params).flatten()
+        self.std_errors_ = np.sqrt(np.diagonal(logit_fitted.cov_params()))
         self.num_iterations = np.asarray(logit_fitted.mle_retvals['iterations'])
-
-    def _get_std_errors(self, X, y):
-        # Multinomial logit Hessian matrix of the log-likelihood, from StatsModels API
-        self.hessian_ = sm.MNLogit(endog=y, exog=X).hessian(params=self.estimates_)
-        self.std_errors_ = np.sqrt(np.diagonal(np.linalg.inv(-self.hessian_)))
