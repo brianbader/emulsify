@@ -25,7 +25,7 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         # ToDo: set up environment (H20, spark, and probably vowpall-wabbit)
         self.model_kwargs = kwargs or {}
         if engine == 'statsmodels':
-            self.model = None  # statsmodels api requires X, y in init step
+            self._statsmodels_engine()
         else:
             self._sklearn_engine()
 
@@ -44,6 +44,11 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         self.model_kwargs['fit_intercept'] = self.fit_intercept
         self.model = ScikitLR(**self.model_kwargs)
 
+    def _statsmodels_engine(self):
+        # statsmodels api requires X, y in init step so doesn't initialize until fit is called
+        if self.penalty != 0.:
+            self.model_kwargs['alpha'] = self.penalty
+
     def _fit_case(self):
         fit_case = {
             'sklearn': self._fit_sklearn,
@@ -59,27 +64,26 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         self.p_values_ = np.array([stat.norm.sf(abs(z)) * 2 for z in self.z_scores_])
         return self
 
-    def _fit_sklearn(self, X, y, sample_weight):
+    def _fit_sklearn(self, X, y, sample_weight, **fit_params):
         self.model.fit(X, y, sample_weight)
 
-        self.estimates_ = self.model.coef_.ravel()
+        self.estimates_ = self.model.coef_.flatten()
         if self.fit_intercept:
             self.estimates_ = np.concatenate((self.model.intercept_, self.estimates_))
 
         self.num_iterations = self.model.n_iter_
 
-    def _fit_statsmodels(self, X, y, sample_weight, **fit_params):
+    def _fit_statsmodels(self, X, y, sample_weight=None, **fit_params):
         X_ = sm.add_constant(X) if self.fit_intercept else X.copy()
-        self.model = StatsModelsLR(exog=X_, endog=y, **self.kwargs)
+        self.model = StatsModelsLR(exog=X_, endog=y)
 
-        if self.penalty == 'l1':
-            logit_fitted = self.model.fit_regularized(disp=False, maxiter=self.max_iter, alpha=1/self.C, **fit_params)
+        if self.penalty == 0.:
+            logit_fitted = self.model.fit(**self.model_kwargs)
         else:
-            if self.penalty != 'none':
-                Warning('Fitting unregularized model...')
-            logit_fitted = self.model.fit(disp=False, maxiter=self.max_iter, **fit_params)
+            Warning('Fitting l1 regularized model with specified penalty... mixture term for statsmodels has no effect')
+            logit_fitted = self.model.fit_regularized(**self.model_kwargs)
 
-        self.estimates_ = logit_fitted.params
+        self.estimates_ = np.asarray(logit_fitted.params).flatten()
         self.num_iterations = np.asarray(logit_fitted.mle_retvals['iterations'])
 
     def _get_std_errors(self, X, y):
