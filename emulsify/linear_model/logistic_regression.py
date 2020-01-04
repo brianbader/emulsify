@@ -5,7 +5,7 @@ import scipy.stats as stat
 import statsmodels.api as sm
 from sklearn.base import BaseEstimator
 from sklearn.linear_model import LogisticRegression as ScikitLR
-from statsmodels.api import Logit as StatsModelsLR  # change to MNLogit
+from statsmodels.api import MNLogit as StatsModelsLR
 
 from emulsify.utils import _get_column_names
 from emulsify.linear_model.base import BaseLinear
@@ -19,7 +19,7 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         self.mode = mode
         self.fit_intercept = fit_intercept
 
-    def set_engine(self, engine='scikit-learn', **kwargs):
+    def set_engine(self, engine='sklearn', **kwargs):
         self.engine = engine
         # ToDo: add engine validation check
         # ToDo: set up environment (H20, spark, and probably vowpall-wabbit)
@@ -41,11 +41,12 @@ class LogisticRegression(BaseEstimator, BaseLinear):
             self.model_kwargs['l1_ratio'] = self.mixture
         if self.penalty != 0.:
             self.model_kwargs['C'] = 1/self.penalty
+        self.model_kwargs['fit_intercept'] = self.fit_intercept
         self.model = ScikitLR(**self.model_kwargs)
 
     def _fit_case(self):
         fit_case = {
-            'scikit-learn': self._fit_sklearn,
+            'sklearn': self._fit_sklearn,
             'statsmodels': self._fit_statsmodels,
         }
         return fit_case
@@ -53,27 +54,19 @@ class LogisticRegression(BaseEstimator, BaseLinear):
     def fit(self, X, y, sample_weight=None, **fit_params):
         self.names_ = _get_column_names(X, self.fit_intercept)
         self._fit_case()[self.engine](X, y, sample_weight, **fit_params)
+        self._get_std_errors(X, y)
         self.z_scores_ = self.estimates_ / self.std_errors_
         self.p_values_ = np.array([stat.norm.sf(abs(z)) * 2 for z in self.z_scores_])
         return self
 
-    def _fit_sklearn(self, X, y, sample_weight, **fit_params):
+    def _fit_sklearn(self, X, y, sample_weight):
         self.model.fit(X, y, sample_weight)
 
         self.estimates_ = self.model.coef_.ravel()
         if self.fit_intercept:
             self.estimates_ = np.concatenate((self.model.intercept_, self.estimates_))
 
-        # borrowed from this: gist.github.com/rspeare/77061e6e317896be29c6de9a85db301d
-        denom = (2.0 * (1.0 + np.cosh(self.model.decision_function(X))))
-        X_ = np.hstack([np.ones((X.shape[0], 1)), X]) if self.fit_intercept else X.copy()
-        denom = np.tile(denom, (X_.shape[1], 1)).T
-
-        f_ij = np.dot((X_ / denom).T, X_)  # fisher information matrix
-        cramer_rao = np.linalg.inv(f_ij)   # inverse fisher matrix
-
-        self.std_errors_ = np.sqrt(np.diagonal(cramer_rao))
-        self.n_iter_ = self.model.n_iter_
+        self.num_iterations = self.model.n_iter_
 
     def _fit_statsmodels(self, X, y, sample_weight, **fit_params):
         X_ = sm.add_constant(X) if self.fit_intercept else X.copy()
@@ -87,5 +80,9 @@ class LogisticRegression(BaseEstimator, BaseLinear):
             logit_fitted = self.model.fit(disp=False, maxiter=self.max_iter, **fit_params)
 
         self.estimates_ = logit_fitted.params
-        self.n_iter_ = np.asarray(logit_fitted.mle_retvals['iterations'])
-        self.std_errors_ = np.sqrt(np.diag(logit_fitted.normalized_cov_params))
+        self.num_iterations = np.asarray(logit_fitted.mle_retvals['iterations'])
+
+    def _get_std_errors(self, X, y):
+        # Multinomial logit Hessian matrix of the log-likelihood, from StatsModels API
+        self.hessian_ = sm.MNLogit(endog=y, exog=X).hessian(params=self.estimates_)
+        self.std_errors_ = np.sqrt(np.diagonal(np.linalg.inv(-self.hessian_)))
