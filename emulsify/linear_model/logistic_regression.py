@@ -21,16 +21,6 @@ class LogisticRegression(BaseEstimator, BaseLinear):
         self.mode = mode
         self.fit_intercept = fit_intercept
 
-    def set_engine(self, engine='sklearn', **kwargs):
-        self.engine = engine
-        # ToDo: add engine validation check
-        # ToDo: set up environment (H20, spark, and probably vowpall-wabbit)
-        self.model_kwargs = kwargs or {}
-        if engine == 'statsmodels':
-            self._statsmodels_engine()
-        else:
-            self._sklearn_engine()
-
     def _sklearn_engine(self):
         if self.penalty == 0.:
             self.model_kwargs['penalty'] = 'none'
